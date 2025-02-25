@@ -38,32 +38,32 @@
         "properties": {
           "barretta.hotReload": {
             "type": "boolean",
-            "description": "Code_Modulesのファイル更新時に自動的にPushします。",
+            "description": "Automatically push changes when files in Code_Modules are updated.",
             "default": true
           },
           "push.ignoreDocuments": {
             "type": "boolean",
-            "description": "ブックやシートなどのドキュメントモジュールを除外します。 ※This version does not work yet.",
+            "description": "Exclude document modules such as Workbook and Worksheet modules. ※This version does not work yet.",
             "default": true
           },
           "pull.ignoreDocuments": {
             "type": "boolean",
-            "description": "ブックやシートなどのドキュメントモジュールを除外します。",
+            "description": "Exclude document modules such as Workbook and Worksheet modules.",
             "default": true
           },
           "pull.encodingToUtf8": {
             "type": "boolean",
-            "description": "テキストファイルをUTF-8でExportします。",
+            "description": "Exports text files in UTF-8 encoding.",
             "default": true
           },
           "vbaLint.enable": {
             "type": "boolean",
-            "description": "VBALintを有効化します。 ※This version does not work yet.",
+            "description": "Enable VBALint. ※This version does not work yet.",
             "default": true
           },
           "vbaLint.processOnSave": {
             "type": "boolean",
-            "description": "コードファイルの保存時にVBALintを実行します。 ※This version does not work yet.",
+            "description": "Run VBALint when the code file is saved. ※This version does not work yet.",
             "default": false
           }
         }
