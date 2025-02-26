@@ -133,6 +133,7 @@ export const preCheckPull: PreCheckPull = (rootPath) => {
     return false;
   }
 
+  const codeModulesPath = path.join(rootPath, "code_modules");
   if (!fs.existsSync(codeModulesPath)) {
     vscode.window.showErrorMessage(
       `Barretta: The [code_modules] folder does not exist.\n${codeModulesPath}`
@@ -237,6 +238,7 @@ export const preCheckCallMacro: PreCheckCallMacro = (rootPath) => {
     return false;
   }
 
+  const codeModulesPath = path.join(rootPath, "code_modules");
   if (!fs.existsSync(codeModulesPath)) {
     vscode.window.showErrorMessage(
       `Barretta: The [code_modules] folder does not exist.\n${codeModulesPath}`
