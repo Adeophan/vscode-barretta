@@ -15,6 +15,37 @@ Write-Output "[barretta] Start processing : pull_modules.ps1"
 [String]$excelPath = "$rootPath/excel_file/$fileName"
 Write-Output "[barretta] Excel FilePath : $excelPath"
 
+# Add Windows API functions via Add-Type - put this at the beginning of your script for better organization
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class Win32Helper {
+    [DllImport("user32.dll", SetLastError=true, CharSet = CharSet.Auto)]
+    public static extern IntPtr FindWindow(string lpClassName, string lpWindowName);
+}
+public class WindowHelper {
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+}
+"@
+Add-Type -AssemblyName System.Windows.Forms
+
+function Find-WindowLike {
+    param([string]$partialTitle)
+    Get-Process | Where-Object {$_.MainWindowTitle -like "*$partialTitle*"} | 
+    Select-Object Id, MainWindowHandle, MainWindowTitle
+}
+function Release-ComObject {
+    param([System.Object]$obj)
+    if ($null -ne $obj) {
+        try {
+            [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($obj) > $null
+        } catch {
+            Write-Output "Error releasing COM object: $_"
+        }
+    }
+}
+
 try {
   $excel = [System.Runtime.InteropServices.Marshal]::GetActiveObject("Excel.Application")
 }
@@ -139,20 +170,54 @@ try {
     }
   }
   
-  # Unlock the VBA project if a password is supplied.
+  # Only unlock the VBA project if it's actually password protected
   if ($vbaPassword -ne "") {
-      Write-Output "[barretta] VBA project is password protected. Attempting to unlock via API..."
-      try {
-          # Ensure the VBA IDE is visible.
-          $excel.VBE.MainWindow.Visible = $True
-          . "$rootPath/barretta-core/scripts/unlock_vba_project.ps1"
-          if (-not (Unlock-VBAProject $vbaPassword)) {
-              Write-Output "Error: VBA project unlocking failed."
-          } else {
-              Write-Output "[barretta] VBA project unlocked successfully."
+      $protection = $book.VBProject.Protection
+      if ($protection -eq 1) {
+          Write-Output "[barretta] VBA project is password protected ($protection). Attempting to unlock via API..."
+          try {
+              $vbe = $excel.VBE
+              # Ensure the VBA IDE is visible
+              $vbe.MainWindow.Visible = $True
+              # Click on Specific VBA Project inside VBA IDE to get password prompt
+              foreach ($project in $vbe.VBProjects) {
+                Write-Output "[barretta] Project : $($project.FileName)"
+                if ($project.FileName -eq $book.FullName) {
+                  $vbe.ActiveVBProject = $project
+                  Start-Sleep -Seconds 1
+                  # Instead of Activate(), try to trigger password prompt by sending Enter to VBA window
+                  Write-Output "[barretta] Attempting to send Enter key to VBA window to trigger password prompt."
+                  $vbaMainWindowTitle = $vbe.MainWindow.Caption
+                  $vbaWindow = Find-WindowLike $vbaMainWindowTitle
+                  $vbaWindowHandle = $vbaWindow[0].MainWindowHandle
+
+                  if ($vbaWindowHandle -ne [IntPtr]::Zero) {
+                      Write-Output "[barretta] VBA window found $($vbaWindowHandle). Sending Enter key."
+                      [WindowHelper]::SetForegroundWindow($vbaWindowHandle)
+                      Start-Sleep -Milliseconds 100
+                      [System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+                      Start-Sleep -Milliseconds 100
+                  } else {
+                      Write-Output "[barretta] VBA window not found. Password prompt may not be triggered."
+                  }
+
+                  Write-Output "[barretta] Caption: $($vbe.MainWindow.Caption)"
+                  Write-Output "[barretta] Selected project : $($book.FullName)"
+                  break
+                }
+              }
+              
+              . "$rootPath/barretta-core/scripts/unlock_vba_project.ps1"
+              if (-not (Unlock-VBAProject $vbaPassword)) {
+                  Write-Output "Error: VBA project unlocking failed."
+              } else {
+                  Write-Output "[barretta] VBA project unlocked successfully."
+              }
+          } catch {
+              Write-Output "Error: Exception during VBA unlock: $_"
           }
-      } catch {
-          Write-Output "Error: Exception during VBA unlock: $_"
+      } else {
+          Write-Output "[barretta] VBA project is not password protected ($protection). Skipping unlock."
       }
   }
   
@@ -198,15 +263,56 @@ catch {
   Write-Error "[barretta] An error has occurred: $_"
 }
 finally {
-  if ($endClose) {
-    $excel.Quit()
-    Write-Output "[barretta] Quit Excel"
+  try {
+    if ($endClose -and $excel) {
+      $excel.Quit()
+      Write-Output "[barretta] Quit Excel"
+    }
   }
-  [System.Runtime.InteropServices.Marshal]::FinalReleaseComObject($excel) > $null
-  $module = $null
-  $book = $null
-  $excel = $null
-  [System.GC]::Collect()
-  Write-Output "[barretta] Garbage collection was executed."
-  Write-Output "[barretta] Finish processing : pull_modules.ps1"
+  catch {
+    Write-Warning "[barretta] Error during Excel.Quit(): $_"
+  }
+  finally {
+    try {
+    if ($null -ne $vbe) { Release-ComObject $vbe }
+    
+    # Release each VBComponent
+    if ($null -ne $book -and $null -ne $book.VBProject -and $null -ne $book.VBProject.VBComponents) {
+        foreach ($component in $book.VBProject.VBComponents) {
+            Release-ComObject $component
+        }
+    }
+    
+    # Release VBProject
+    if ($null -ne $book -and $null -ne $book.VBProject) {
+        Release-ComObject $book.VBProject
+    }
+    
+    # Release workbook
+    if ($null -ne $book) { Release-ComObject $book }
+    
+    # Close Excel only if we opened it
+    if ($endClose -and $null -ne $excel) {
+        $excel.Quit()
+    }
+    
+    # Release Excel
+    if ($null -ne $excel) { Release-ComObject $excel }
+} catch {
+    Write-Output "Error during cleanup: $_"
+} finally {
+    $vbe = $null
+    $module = $null
+    $book = $null
+    $excel = $null
+    [System.GC]::Collect()
+    [System.GC]::WaitForPendingFinalizers()
+}
+
+    [System.GC]::Collect()
+    [System.GC]::WaitForPendingFinalizers()
+    [System.GC]::Collect()
+    Write-Output "[barretta] Garbage collection was executed."
+    Write-Output "[barretta] Finish processing : pull_modules.ps1"
+  }
 }
