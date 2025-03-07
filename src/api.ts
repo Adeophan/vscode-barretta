@@ -1,8 +1,6 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import * as iconv from "iconv-lite";
-import * as encoding from "encoding-japanese";
 import * as gen from "./generator";
 import { setRootPath } from "./lib_vscode_api";
 import {
@@ -130,6 +128,10 @@ export const pushExcel: PushExcel = async () => {
   );
   const fileName: string = excelFileList[0];
 
+  // Read the VBA password from the "barretta" configuration.
+  const barrettaConfig = vscode.workspace.getConfiguration("barretta");
+  const vbaPassword: string = barrettaConfig.get("vbaPassword") || "";
+
   vscode.window.withProgress(
     { location: vscode.ProgressLocation.Notification, title: "Barretta: Push" },
     async (progress) => {
@@ -163,31 +165,20 @@ export const pushExcel: PushExcel = async () => {
           console.log(`Barretta: File Copied to dist. : ${file}`);
         });
 
-        // Convert UTF-8 files in dist (except for .frx) to Shift-JIS.
-        fs.readdirSync(distPath).map((file) => {
-          if (path.extname(file) !== ".frx") {
-            const txtData: Buffer = fs.readFileSync(path.join(distPath, file));
-            if (encoding.detect(txtData) === "UTF8") {
-              const buf: Buffer = iconv.encode(String(txtData), "CP932");
-              fs.writeFileSync(path.join(distPath, file), buf);
-              console.log(`Barretta: ${file} encoding to Shift-JIS.`);
-            }
-          }
-        });
+        // Generate push_modules.ps1 with the new parameter.
+        const configPush: vscode.WorkspaceConfiguration =
+          vscode.workspace.getConfiguration("push");
+        const pushIgnoreDocument: boolean =
+          configPush.get("ignoreDocuments") ?? false;
 
-        // Generate push_modules.ps1
         const genParams = {
           rootPath,
           fileName,
+          pushIgnoreDocument,
+          vbaPassword,
         };
         fs.appendFileSync(ps1FilePath, gen.generatePushPs1(genParams));
         console.log("Barretta: push_modules.ps1 Created.");
-
-        // Convert ps1 file to Shift-JIS.
-        const txtData: Buffer = fs.readFileSync(ps1FilePath);
-        const buf: Buffer = iconv.encode(String(txtData), "CP932");
-        fs.writeFileSync(ps1FilePath, buf);
-        console.log(`Barretta: push_modules.ps1 encoding to Shift-JIS.`);
 
         // Execute the ps1 file.
         const ps1Params: Ps1Params = {
@@ -255,19 +246,17 @@ export const pullExcel: PullExcel = async () => {
         const pullIgnoreDocument: boolean =
           config.get("ignoreDocuments") ?? false;
 
+        const barrettaConfig = vscode.workspace.getConfiguration("barretta");
+        const vbaPassword: string = barrettaConfig.get("vbaPassword") || "";
+
         const genParams = {
           rootPath,
           fileName,
           pullIgnoreDocument,
+          vbaPassword,
         };
         fs.appendFileSync(ps1FilePath, gen.generatePullPs1(genParams));
         console.log("Barretta: pull_modules.ps1 Created.");
-
-        // Convert ps1 file to Shift-JIS.
-        const txtData: Buffer = fs.readFileSync(ps1FilePath);
-        const buf: Buffer = iconv.encode(String(txtData), "CP932");
-        fs.writeFileSync(ps1FilePath, buf);
-        console.log(`Barretta: pull_modules.ps1 encoding to Shift-JIS.`);
 
         // Execute the ps1 file.
         const ps1Params: Ps1Params = {
@@ -276,19 +265,6 @@ export const pullExcel: PullExcel = async () => {
         };
 
         if (await runPs1(ps1Params)) {
-          if (config.get("encodingToUtf8")) {
-            const modulePath = path.join(rootPath, "code_modules");
-            fs.readdirSync(modulePath).map((file) => {
-              if (path.extname(file) !== ".frx") {
-                const txtData: Buffer = fs.readFileSync(
-                  path.join(modulePath, file)
-                );
-                const buf: string = iconv.decode(txtData, "Shift-JIS");
-                fs.writeFileSync(path.join(modulePath, file), buf);
-                console.log(`Barretta: ${file} encoding to UTF-8.`);
-              }
-            });
-          }
           vscode.window.showInformationMessage(
             "Barretta: Exported to code_modules folder."
           );
@@ -349,12 +325,6 @@ export const openBook: OpenBook = async () => {
         };
         fs.appendFileSync(ps1FilePath, gen.generateOpenBookPs1(genParams));
         console.log("Barretta: open_excelbook.ps1 Created.");
-
-        // Convert ps1 file to Shift-JIS.
-        const txtData: Buffer = fs.readFileSync(ps1FilePath);
-        const buf: Buffer = iconv.encode(String(txtData), "CP932");
-        fs.writeFileSync(ps1FilePath, buf);
-        console.log(`Barretta: open_excelbook.ps1 encoding to Shift-JIS.`);
 
         // Execute the ps1 file.
         const ps1Params: Ps1Params = {
@@ -430,12 +400,6 @@ export const callMacro: CallMacro = async (callMethod, methodParams?) => {
           "barretta-core/scripts/run_macro.ps1"
         );
 
-        // Convert ps1 file to Shift-JIS.
-        const txtData: Buffer = fs.readFileSync(ps1FilePath);
-        const buf: Buffer = iconv.encode(String(txtData), "CP932");
-        fs.writeFileSync(ps1FilePath, buf);
-        console.log(`Barretta: run_macro.ps1 encoding to Shift-JIS.`);
-
         // Execute the ps1 file.
         const ps1Params: Ps1Params = {
           execType: "-File",
@@ -497,4 +461,130 @@ const runPs1: RunPS1 = async (ps1Params): Promise<boolean> => {
   }
 
   return error === "" ? true : false;
+};
+
+export const pushSingleExcel = async (moduleName: string) => {
+  console.log(`Barretta: Start pushSingleExcel.`);
+
+  const rootPath: string | undefined = await setRootPath();
+  if (rootPath === undefined) {
+    console.log(`Barretta: Exit pushSingleExcel.`);
+    return;
+  }
+
+  if (!preCheckPush(rootPath)) {
+    console.log(`Barretta: Failed preCheckPush.`);
+    return;
+  }
+
+  const fileList: string[] = fs.readdirSync(path.join(rootPath, "excel_file"));
+  const excelFileList: string[] = fileList.filter((fileName) =>
+    fileName.match(/^(?!~\$).*\.(xls$|xlsx$|xlsm$|xlsb$|xlam$)/g)
+  );
+  const excelFileName: string = excelFileList[0];
+
+  // Module file path
+  const codeModulesPath = path.join(rootPath, "code_modules");
+  const moduleFilePath = path.join(codeModulesPath, moduleName);
+  const moduleFileName = path.basename(moduleFilePath);
+
+  // dist folder path
+  const distPath: string = path.join(rootPath, "barretta-core/dist");
+  const ps1FilePath = path.join(
+    rootPath,
+    "barretta-core/scripts/push_modules.ps1"
+  );
+
+  // Read the VBA password from the "barretta" configuration.
+  const barrettaConfig = vscode.workspace.getConfiguration("barretta");
+  const vbaPassword: string = barrettaConfig.get("vbaPassword") || "";
+
+  vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "Barretta: Push (Single Module)",
+    },
+    async (progress) => {
+      progress.report({ message: "Working on single module push..." });
+
+      try {
+        // Recreate or clean up the [dist] folder.
+        if (!fs.existsSync(distPath)) {
+          fs.mkdirSync(distPath);
+          console.log(`Barretta: Recreate [dist] folder.`);
+        } else {
+          fs.readdirSync(distPath).map((file) => {
+            fs.unlinkSync(path.join(distPath, file));
+            console.log(`Barretta: Delete ${file}.`);
+          });
+        }
+
+        // Copy module file to dist.
+        fs.copyFileSync(moduleFilePath, path.join(distPath, moduleFileName));
+        console.log(
+          `Barretta: Module File Copied to dist. : ${moduleFileName}`
+        );
+
+        // If the module is a form (.frm), also copy the corresponding .frx file
+        if (path.extname(moduleFileName).toLowerCase() === ".frm") {
+          const baseName = path.basename(moduleFileName, ".frm");
+          const frxFileName = baseName + ".frx";
+          const srcFrxFilePath = path.join(codeModulesPath, frxFileName);
+          if (fs.existsSync(srcFrxFilePath)) {
+            const destFrxFilePath = path.join(distPath, frxFileName);
+            fs.copyFileSync(srcFrxFilePath, destFrxFilePath);
+            console.log(
+              `Barretta: Associated FRX file copied to dist: ${frxFileName}`
+            );
+          } else {
+            console.warn(
+              `Barretta: Expected FRX file not found: ${frxFileName}`
+            );
+          }
+        }
+
+        // Generate push_modules.ps1 with the new parameters
+        const configPush: vscode.WorkspaceConfiguration =
+          vscode.workspace.getConfiguration("push");
+        const pushIgnoreDocument: boolean =
+          configPush.get("ignoreDocuments") ?? false;
+        const genParams = {
+          rootPath,
+          fileName: excelFileName, // excel file name remains the same
+          pushIgnoreDocument,
+          vbaPassword,
+        };
+        fs.appendFileSync(ps1FilePath, gen.generatePushPs1(genParams));
+        console.log("Barretta: push_modules.ps1 Created.");
+
+        // Execute the ps1 file
+        const ps1Params: Ps1Params = {
+          execType: "-File",
+          ps1FilePath,
+        };
+
+        if (await runPs1(ps1Params)) {
+          vscode.window.showInformationMessage(
+            `Barretta: Excel file imported (single module).`
+          );
+          console.log(`Barretta: Complete pushSingleExcel.`);
+        } else {
+          vscode.window.showErrorMessage(
+            `Barretta: Code module import failed (single module).`
+          );
+          console.log(`Barretta: Failed pushSingleExcel.`);
+        }
+      } catch (e) {
+        console.error(
+          `Barretta: Unknown error has occurred in pushSingleExcel.`
+        );
+        console.error(e);
+      } finally {
+        if (fs.existsSync(ps1FilePath)) {
+          fs.unlinkSync(ps1FilePath);
+          console.log(`Barretta: push_modules.ps1 deleted.`);
+        }
+      }
+    }
+  );
 };

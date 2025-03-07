@@ -1,41 +1,42 @@
-import * as ps from "./load_asset"
+import * as ps from "./load_asset";
 
 type GenerateOpenBookPs1 = {
-  (params: Ps1GenerateParams): string
-}
+  (params: Ps1GenerateParams): string;
+};
 
 type GeneratePushPs1 = {
-  (params: Ps1GenerateParams): string
-}
+  (params: Ps1GenerateParams): string;
+};
 
 type GeneratePullPs1 = {
-  (params: Ps1GenerateParams): string
-}
+  (params: Ps1GenerateParams): string;
+};
 
 type GenerateRunMacroPs1 = {
-  (params: Ps1GenerateParams): string
-}
+  (params: Ps1GenerateParams): string;
+};
 
 type GenerateGitignore = {
-  (): string
-}
+  (): string;
+};
 
 type GenerateWorkspace = {
-  (): string
-}
+  (): string;
+};
 
 type GenerateBarrettaLauncher = {
-  (): string
-}
+  (): string;
+};
 
 type Ps1GenerateParams = {
-  rootPath: string,
-  fileName: string,
-  callMethod?: string,
-  methodParams?: (string | number | boolean)[] | undefined,
-  pullIgnoreDocument?: boolean,
-  pushIgnoreDocument?: boolean
-}
+  rootPath: string;
+  fileName: string;
+  callMethod?: string;
+  methodParams?: (string | number | boolean)[] | undefined;
+  pullIgnoreDocument?: boolean;
+  pushIgnoreDocument?: boolean;
+  vbaPassword?: string;
+};
 
 /**
  * ExcelBookを開くPowershellスクリプトを返します。
@@ -44,25 +45,25 @@ type Ps1GenerateParams = {
  */
 export const generateOpenBookPs1: GenerateOpenBookPs1 = (genParams) => {
   //引数をPowerShellスクリプトに埋め込む
-  const test: string = ps.default.openExcelbook as string
-  console.log("src", test)
+  const test: string = ps.default.openExcelbook as string;
+  console.log("src", test);
   const pwshWithArgs: string = ps.default.openExcelbook
     .replace(/{{argument1}}/g, genParams.rootPath)
-    .replace(/{{argument2}}/g, genParams.fileName)
+    .replace(/{{argument2}}/g, genParams.fileName);
 
-  console.log("changed", pwshWithArgs)
-  return pwshWithArgs
-}
+  console.log("changed", pwshWithArgs);
+  return pwshWithArgs;
+};
 
 /**
  * type guard function to check if a value is a boolean
- * @param value 
+ * @param value
  *  @type unknown
  * @returns If `value` is a boolean, should return `true`.
  */
 const isBoolean = (value: unknown): value is boolean => {
-  return value !== undefined && typeof value === "boolean"
-}
+  return value !== undefined && typeof value === "boolean";
+};
 
 /**
  * type guard function to check if a value is a string
@@ -70,44 +71,30 @@ const isBoolean = (value: unknown): value is boolean => {
  * @returns If `value` is a string, should return `true`.
  */
 const isString = (value: unknown): value is string => {
-  return value !== undefined && typeof value === "string"
-}
+  return value !== undefined && typeof value === "string";
+};
 
 export const generatePushPs1: GeneratePushPs1 = (genParams) => {
-  //引数をPowerShellスクリプトに埋め込む
   const pwshWithArgs = ps.default.pushToExcelbook
     .replace(/{{argument1}}/g, genParams.rootPath)
     .replace(/{{argument2}}/g, genParams.fileName)
-    .replace(/{{argument3}}/g, () => {
-      if (isBoolean(genParams.pushIgnoreDocument)) {
-        return genParams.pushIgnoreDocument ? "true" : "false"
-      } else {
-        return "false"
-      }
-    })
-
-  return pwshWithArgs
-}
+    .replace(/{{argument3}}/g, genParams.pushIgnoreDocument ? "true" : "false")
+    .replace(/{{argument4}}/g, genParams.vbaPassword || "");
+  return pwshWithArgs;
+};
 
 /**
  * @param genParams
  * @returns
  */
 export const generatePullPs1: GeneratePullPs1 = (genParams) => {
-  //引数をPowerShellスクリプトに埋め込む
   const pwshWithArgs = ps.default.pullFromExcelbook
     .replace(/{{argument1}}/g, genParams.rootPath)
     .replace(/{{argument2}}/g, genParams.fileName)
-    .replace(/{{argument3}}/g, () => {
-      if (isBoolean(genParams.pullIgnoreDocument)) {
-        return genParams.pullIgnoreDocument ? "true" : "false"
-      } else {
-        return "false"
-      }
-    })
-
-  return pwshWithArgs
-}
+    .replace(/{{argument3}}/g, genParams.pullIgnoreDocument ? "true" : "false")
+    .replace(/{{argument4}}/g, genParams.vbaPassword || "");
+  return pwshWithArgs;
+};
 
 export const generateRunMacroPs1: GenerateRunMacroPs1 = (params) => {
   let paramsText = "";
@@ -121,17 +108,17 @@ export const generateRunMacroPs1: GenerateRunMacroPs1 = (params) => {
     });
   }
   //引数をPowerShellスクリプトに埋め込む
-  const pwshWithArgs = ps.default.pullFromExcelbook
+  const pwshWithArgs = ps.default.runMacro
     .replace(/{{argument1}}/g, params.rootPath)
     .replace(/{{argument2}}/g, params.fileName)
     .replace(/{{argument3}}/g, () => {
       if (isString(params.callMethod)) {
-        return params.callMethod
+        return params.callMethod;
       } else {
         throw new Error("callMethodIsNull");
       }
     })
-    .replace(/{{argument4}}/g, paramsText)
+    .replace(/{{argument4}}/g, paramsText);
   return pwshWithArgs;
 };
 
@@ -152,6 +139,9 @@ export const generateWorkspace: GenerateWorkspace = (): string => {
         "*.bas": "vb",
         "*.frm": "vb",
       },
+    },
+    "search.exclude": {
+      "barretta-core": true,
     },
   };
   return JSON.stringify(jsonData, null, 2);
